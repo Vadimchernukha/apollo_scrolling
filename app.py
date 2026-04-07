@@ -176,7 +176,7 @@ def get_job(job_id: str | None) -> dict[str, Any] | None:
 
 # ── main UI ───────────────────────────────────────────────────────────────────
 
-def main_ui() -> None:
+def main_ui(authenticator: stauth.Authenticate) -> None:
     st.title("Apollo Lead Scoring")
     st.caption("B2B ICP scoring: Claude Haiku 4.5 + Apollo → сайт → DuckDuckGo.")
 
@@ -237,7 +237,6 @@ def main_ui() -> None:
         )
 
         st.divider()
-        authenticator = _get_authenticator()
         authenticator.logout(button_name="Выйти", location="sidebar")
 
     df = st.session_state.uploaded_df
@@ -350,7 +349,7 @@ def main() -> None:
     elif auth_status is None:
         st.info("Введите логин и пароль.")
     else:
-        main_ui()
+        main_ui(authenticator)
 
 
 if __name__ == "__main__":
