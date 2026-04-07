@@ -5,8 +5,6 @@ Uses Anthropic Claude 3 Haiku with strict JSON responses.
 
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 import json
 import logging
 import re
@@ -135,52 +133,37 @@ Based only on the above, does this company match the ICP?"""
     return data["status"], data["reason"], "Apollo_Data", tokens
 
 
-async def _crawl_text(url: str, max_chars: int = 3000) -> tuple[str | None, str | None]:
-    try:
-        from crawl4ai import AsyncWebCrawler  # lazy import
-
-        async with AsyncWebCrawler() as crawler:
-            result = await crawler.arun(url=url)
-        if result is None:
-            return None, "empty result"
-        if hasattr(result, "success") and not result.success:
-            err = getattr(result, "error_message", None) or "crawl unsuccessful"
-            code = getattr(result, "status_code", None)
-            return None, f"{err} (status={code})"
-        md = getattr(result, "markdown", None)
-        text = str(md).strip() if md is not None else ""
-        if not text:
-            ch = getattr(result, "cleaned_html", None) or getattr(result, "html", None)
-            text = (str(ch).strip() if ch else "")
-        if not text and hasattr(result, "extracted_content"):
-            text = (result.extracted_content or "").strip()
-        if not text:
-            return None, "no text extracted"
-        return text[:max_chars], None
-    except Exception as e:
-        logger.exception("crawl4ai error")
-        return None, str(e)
-
-
-def fetch_website_text(url: str) -> tuple[str | None, str | None]:
+def fetch_website_text(url: str, max_chars: int = 3000) -> tuple[str | None, str | None]:
+    """Fetch plain text from a URL using requests + BeautifulSoup."""
     if not url or not str(url).strip() or str(url).lower() in ("nan", "none"):
         return None, "empty URL"
     u = str(url).strip()
     if not u.startswith(("http://", "https://")):
         u = "https://" + u
-
-    def _run_crawl_in_thread() -> tuple[str | None, str | None]:
-        """Streamlit / nested contexts may already have a running loop; fresh thread is safe."""
-        return asyncio.run(_crawl_text(u))
-
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            fut = pool.submit(_run_crawl_in_thread)
-            return fut.result(timeout=180)
-    except concurrent.futures.TimeoutError:
-        return None, "crawl timeout (180s)"
+        import requests
+        from bs4 import BeautifulSoup
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            )
+        }
+        resp = requests.get(u, headers=headers, timeout=15, allow_redirects=True)
+        if resp.status_code >= 400:
+            return None, f"HTTP {resp.status_code}"
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "form", "iframe"]):
+            tag.decompose()
+        text = soup.get_text(separator=" ", strip=True)
+        text = re.sub(r"\s{2,}", " ", text).strip()
+        if not text:
+            return None, "no text extracted"
+        return text[:max_chars], None
     except Exception as e:
-        logger.exception("async crawl wrapper")
+        logger.exception("fetch_website_text error")
         return None, str(e)
 
 
