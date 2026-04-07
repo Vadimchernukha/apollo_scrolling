@@ -1,0 +1,59 @@
+# Ideal Customer Profile (ICP) definitions for Apollo lead scoring
+
+B2B_SaaS:
+  description: >
+    TARGET: Any company that has built its OWN software product for external clients or end users.
+    This includes SaaS, on-premise software, licensed platforms, mobile apps, and proprietary digital tools
+    sold or provided to customers — not just "as a service" delivery models.
+
+    GOOD FIT (answer YES):
+    - SaaS companies with a cloud-based product for business or consumer clients.
+    - ISVs (Independent Software Vendors) selling licensed or subscription software.
+    - Companies whose core value to customers is delivered through a software product they built.
+    - B2B platforms, marketplaces, or portals built on proprietary software.
+    - Embedded software or firmware companies (if software is the product sold to clients).
+
+    NOT A FIT (answer NO) — if their PRIMARY business is:
+    - Pure IT services, consulting, outsourcing, or staff augmentation (they sell human time, not software).
+    - Digital/marketing agencies (they sell campaigns or creative work, not a software product).
+    - Physical product manufacturers or hardware companies with no software product for clients.
+    - Resellers or integrators of third-party software (they don't own the product).
+    - Crypto, blockchain, Web3, NFT, or DeFi companies.
+    - Gaming, game development, or esports companies.
+    - Government, public sector, or government-owned entities.
+    - Enterprise mega-vendors: companies the size of Microsoft, SAP, Oracle, Salesforce, Amazon AWS,
+      Google, IBM — or any product that is a module/add-on exclusively within their ecosystems
+      (e.g. SAP add-ons, Microsoft 365 plugins sold only via AppSource).
+    - Consumer apps targeting individual end-users (B2C), not businesses.
+
+    KEY RULE: Does this company have a proprietary B2B software product for business clients,
+    outside of crypto/gaming/government/mega-vendor ecosystems?
+    If YES → answer YES. Otherwise → answer NO.
+
+HealthCare_NonIT:
+  description: >
+    TARGET: Any organization operating in the healthcare, medical, life sciences, or biotech space —
+    whether they deliver patient care, conduct research, or work with biological/medical materials.
+
+    GOOD FIT (answer YES):
+    - Hospitals, clinics, medical practices, dental offices, ophthalmology, optometry.
+    - Physical therapy, rehabilitation, chiropractic, nursing homes, assisted living facilities.
+    - Veterinary clinics, animal hospitals, pet care centers.
+    - Diagnostic laboratories, imaging centers, pathology labs, blood banks.
+    - Pharmacies, compounding pharmacies, dispensaries.
+    - Mental health practices, psychology clinics, addiction treatment centers.
+    - Biotech and biopharma companies (drug discovery, therapeutics, biologics).
+    - Medical research institutes, clinical research organizations (CROs), academic medical centers.
+    - Life sciences companies working with biological materials, genomics, diagnostics.
+    - Medical device companies (hardware/physical devices for diagnosis or treatment).
+    - Wellness centers and integrative medicine practices providing in-person services.
+
+    NOT A FIT (answer NO) — only if their PRIMARY business is:
+    - Building or selling healthcare IT software/SaaS to other organizations (EHR vendors,
+      telemedicine platforms, health-tech startups whose product is software).
+    - Pure IT consulting or digital agency services targeting the healthcare sector.
+    - Medical staffing or HR/recruiting agencies as their standalone business.
+
+    KEY RULE: Is this company's core activity in healthcare delivery, research, or life sciences?
+    If YES → answer YES, even if they use software internally or have some tech component.
+    Only answer NO if their PRIMARY product/service is software or IT services sold to healthcare orgs.
