@@ -39,18 +39,22 @@ def _get_jobs() -> dict[str, dict[str, Any]]:
 
 # ── authenticator (cookie-based, survives page refresh) ──────────────────────
 
-@st.cache_resource
 def _get_authenticator() -> stauth.Authenticate:
-    """Built once and reused; credentials come from st.secrets."""
-    credentials = st.secrets.get("credentials", {})
+    """Create authenticator each run — credentials from st.secrets or defaults."""
+    try:
+        credentials = st.secrets.get("credentials", None)
+        cookie_secret = st.secrets.get("COOKIE_SECRET", "apollo-brain-default-secret-2026")
+    except Exception:
+        credentials = None
+        cookie_secret = "apollo-brain-default-secret-2026"
+
     if not credentials:
-        # Fallback for local dev without secrets.toml
         credentials = {
             "usernames": {
                 "admin": {"name": "Admin", "email": "", "password": "admin"}
             }
         }
-    cookie_secret = st.secrets.get("COOKIE_SECRET", "apollo-brain-default-secret-2026")
+
     return stauth.Authenticate(
         credentials=dict(credentials),
         cookie_name="apollo_brain_auth",
