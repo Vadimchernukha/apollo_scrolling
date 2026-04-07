@@ -234,7 +234,7 @@ def main_ui() -> None:
 
         st.divider()
         authenticator = _get_authenticator()
-        authenticator.logout("Выйти", "sidebar")
+        authenticator.logout(button_name="Выйти", location="sidebar")
 
     df = st.session_state.uploaded_df
     icp_key = st.session_state.icp_profile
@@ -329,7 +329,7 @@ def main() -> None:
     init_session()
 
     authenticator = _get_authenticator()
-    name, auth_status, username = authenticator.login(
+    authenticator.login(
         location="main",
         fields={
             "Form name": "Apollo Lead Scoring",
@@ -338,6 +338,8 @@ def main() -> None:
             "Login": "Войти",
         },
     )
+
+    auth_status = st.session_state.get("authentication_status")
 
     if auth_status is False:
         st.error("Неверный логин или пароль.")
