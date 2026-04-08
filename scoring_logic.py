@@ -116,7 +116,9 @@ def step1_apollo(
     if not has_any:
         return "MAYBE", "No Apollo description/technologies/keywords", "Apollo_Data", 0
 
-    prompt = f"""ICP (Ideal Customer Profile) criteria:
+    prompt = f"""You are a senior B2B sales researcher qualifying companies for a sales pipeline.
+
+ICP (Ideal Customer Profile) criteria:
 {icp_description}
 
 Company data from Apollo export:
@@ -176,7 +178,9 @@ def step2_website(
     if err or not text:
         return "MAYBE", f"Website unavailable or empty: {err or 'unknown'}", "Website_Scraped", 0
 
-    prompt = f"""ICP criteria:
+    prompt = f"""You are a senior B2B sales researcher qualifying companies for a sales pipeline.
+
+ICP criteria:
 {icp_description}
 
 Below is text extracted from the company website (may be truncated):
@@ -227,7 +231,9 @@ def step3_ddg(
 
     combined = "\n\n---\n\n".join(snippets)[:4000]
 
-    prompt = f"""ICP criteria:
+    prompt = f"""You are a senior B2B sales researcher qualifying companies for a sales pipeline.
+
+ICP criteria:
 {icp_description}
 
 DuckDuckGo search snippets for "{query}":

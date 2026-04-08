@@ -57,3 +57,30 @@ HealthCare_NonIT:
     KEY RULE: Is this company's core activity in healthcare delivery, research, or life sciences?
     If YES → answer YES, even if they use software internally or have some tech component.
     Only answer NO if their PRIMARY product/service is software or IT services sold to healthcare orgs.
+
+Enterprise:
+  description: >
+    TARGET: Any company in any industry EXCEPT gaming, crypto/blockchain/Web3, and pure IT services
+    (outsourcing, staff augmentation, body-shop agencies).
+
+    GOOD FIT (answer YES):
+    - Manufacturing, logistics, supply chain, industrial, construction, real estate.
+    - Healthcare, biotech, medtech, life sciences, pharma.
+    - SaaS, software product, hardware, IoT, AI/ML companies.
+    - Fintech, insurtech, proptech, legaltech, edtech.
+    - E-commerce, retail, marketplaces, food, agriculture, energy, utilities.
+    - Media, publishing, marketing tech (if they have real infrastructure or own product).
+    - IT services / outsourcing / staffing companies — answer YES IF they also have their own
+      software product or platform; otherwise answer NO.
+
+    NOT A FIT (answer NO):
+    - Gaming, game development, esports, game studios.
+    - Crypto, blockchain, Web3, NFT, DeFi, token projects.
+    - Pure IT outsourcing / staff augmentation / body-shop agencies with NO own software product
+      (primary message: "hire developers", "dedicated team", "nearshore dev").
+
+    KEY RULE: Is the company's primary business something other than gaming, crypto, or pure IT staffing?
+    If YES → answer YES.
+    If it IS gaming/crypto → answer NO.
+    If it IS an IT services company but also has its own software product → answer YES.
+    If it IS a pure IT services company with no own product → answer NO.
