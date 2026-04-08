@@ -27,6 +27,7 @@ from scoring_logic import (
 
 BASE_DIR = Path(__file__).resolve().parent
 PROFILES_PATH = BASE_DIR / "profiles.yaml"
+RESULTS_DIR = BASE_DIR / "results"
 
 
 # ── persistent job store ──────────────────────────────────────────────────────
@@ -143,7 +144,17 @@ def _worker(job_id: str, api_key: str, icp_desc: str, df: pd.DataFrame) -> None:
     result_df = pd.DataFrame(out_rows) if out_rows else pd.DataFrame()
     job["result_df"] = result_df
     if not result_df.empty:
-        job["result_xlsx"] = export_colored_xlsx(result_df)
+        xlsx_bytes = export_colored_xlsx(result_df)
+        job["result_xlsx"] = xlsx_bytes
+        # Persist to disk so results survive page refresh / app restart
+        try:
+            RESULTS_DIR.mkdir(exist_ok=True)
+            result_path = RESULTS_DIR / f"apollo_scored_{job_id[:8]}.xlsx"
+            result_path.write_bytes(xlsx_bytes)
+            job["result_path"] = str(result_path)
+            job["log"].append(f"💾 Результат сохранён: {result_path.name}")
+        except Exception as e:
+            logger.warning("Could not save result to disk: %s", e)
     job["log"].append(
         "Готово." if not stop_event.is_set()
         else "Остановлено — частичный результат доступен для скачивания."
@@ -323,6 +334,30 @@ def main_ui(authenticator: stauth.Authenticate) -> None:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"dl_{st.session_state.job_id}",
                 )
+
+    # ── saved results on disk (survive page refresh / process restart) ─────────
+    if RESULTS_DIR.exists():
+        saved = sorted(RESULTS_DIR.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if saved:
+            st.divider()
+            st.subheader("Сохранённые результаты")
+            for i, path in enumerate(saved[:10]):
+                mtime = path.stat().st_mtime
+                import datetime
+                ts = datetime.datetime.fromtimestamp(mtime).strftime("%d.%m.%Y %H:%M")
+                col_name, col_btn, col_del = st.columns([4, 2, 1])
+                col_name.write(f"📄 {path.name}  \n*{ts}*")
+                with open(path, "rb") as f:
+                    col_btn.download_button(
+                        label="⬇ Скачать",
+                        data=f.read(),
+                        file_name=path.name,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"saved_dl_{i}",
+                    )
+                if col_del.button("🗑", key=f"del_{i}", help="Удалить файл"):
+                    path.unlink(missing_ok=True)
+                    st.rerun()
 
 
 # ── entry point ───────────────────────────────────────────────────────────────

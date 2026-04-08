@@ -13,6 +13,9 @@ env/
 dist/
 build/
 
+# Scored results (generated locally, not committed)
+results/
+
 # macOS
 .DS_Store
 
