@@ -23,6 +23,7 @@ from scoring_logic import (
     estimate_cost_usd,
     export_colored_xlsx,
     score_company_row,
+    score_company_row_enterprise,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -101,7 +102,9 @@ def init_session() -> None:
 
 # ── background worker ─────────────────────────────────────────────────────────
 
-def _worker(job_id: str, api_key: str, icp_desc: str, df: pd.DataFrame) -> None:
+def _worker(
+    job_id: str, api_key: str, icp_desc: str, df: pd.DataFrame, profile_type: str = "standard"
+) -> None:
     job = _get_jobs()[job_id]
     stop_event: threading.Event = job["stop_event"]
     out_rows: list[dict] = []
@@ -124,7 +127,10 @@ def _worker(job_id: str, api_key: str, icp_desc: str, df: pd.DataFrame) -> None:
         job["processed"] = len(out_rows)
 
         try:
-            result, tok = score_company_row(api_key, icp_desc, row_dict)
+            if profile_type == "enterprise":
+                result, tok = score_company_row_enterprise(api_key, row_dict)
+            else:
+                result, tok = score_company_row(api_key, icp_desc, row_dict)
             total_tokens += tok
         except Exception as e:
             errors += 1
@@ -151,7 +157,7 @@ def _worker(job_id: str, api_key: str, icp_desc: str, df: pd.DataFrame) -> None:
     job["done"] = True
 
 
-def start_job(api_key: str, icp_desc: str, df: pd.DataFrame) -> str:
+def start_job(api_key: str, icp_desc: str, df: pd.DataFrame, profile_type: str = "standard") -> str:
     job_id = str(uuid.uuid4())
     _get_jobs()[job_id] = {
         "stop_event": threading.Event(),
@@ -165,7 +171,7 @@ def start_job(api_key: str, icp_desc: str, df: pd.DataFrame) -> str:
         "result_xlsx": None,
     }
     threading.Thread(
-        target=_worker, args=(job_id, api_key, icp_desc, df), daemon=True
+        target=_worker, args=(job_id, api_key, icp_desc, df, profile_type), daemon=True
     ).start()
     return job_id
 
@@ -242,6 +248,7 @@ def main_ui(authenticator: stauth.Authenticate) -> None:
     df = st.session_state.uploaded_df
     icp_key = st.session_state.icp_profile
     icp_desc = profiles[icp_key].get("description", "") if icp_key else ""
+    icp_type = profiles[icp_key].get("profile_type", "standard") if icp_key else "standard"
 
     # ── START / STOP buttons ──────────────────────────────────────────────────
     btn_col, info_col = st.columns([2, 3])
@@ -266,7 +273,7 @@ def main_ui(authenticator: stauth.Authenticate) -> None:
             st.info("Идёт скоринг… нажмите ⏹ STOP чтобы прервать.")
 
     if b_start and df is not None and api_key:
-        st.session_state.job_id = start_job(api_key, icp_desc, df)
+        st.session_state.job_id = start_job(api_key, icp_desc, df, profile_type=icp_type)
         st.rerun()
 
     if b_stop:

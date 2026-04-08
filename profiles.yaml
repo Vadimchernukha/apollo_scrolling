@@ -57,3 +57,10 @@ HealthCare_NonIT:
     KEY RULE: Is this company's core activity in healthcare delivery, research, or life sciences?
     If YES → answer YES, even if they use software internally or have some tech component.
     Only answer NO if their PRIMARY product/service is software or IT services sold to healthcare orgs.
+
+Enterprise:
+  profile_type: enterprise
+  description: >
+    Enterprise technology & industrial company qualification.
+    Targets companies that either build their own technology product OR meaningfully use
+    technology in scaled operations (manufacturing, logistics, regulated production, etc.).
