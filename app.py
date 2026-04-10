@@ -19,7 +19,8 @@ import streamlit_authenticator as stauth
 import yaml
 
 from scoring_logic import (
-    DEFAULT_COST_PER_MILLION_TOKENS_USD,
+    DEFAULT_COST_INPUT_PER_MILLION_USD,
+    DEFAULT_COST_OUTPUT_PER_MILLION_USD,
     estimate_cost_usd,
     export_colored_xlsx,
     score_company_row,
@@ -96,8 +97,10 @@ def init_session() -> None:
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
-    if "cost_per_million_field" not in st.session_state:
-        st.session_state.cost_per_million_field = float(DEFAULT_COST_PER_MILLION_TOKENS_USD)
+    if "cost_input_per_million" not in st.session_state:
+        st.session_state.cost_input_per_million = float(DEFAULT_COST_INPUT_PER_MILLION_USD)
+    if "cost_output_per_million" not in st.session_state:
+        st.session_state.cost_output_per_million = float(DEFAULT_COST_OUTPUT_PER_MILLION_USD)
 
 
 # ── background worker ─────────────────────────────────────────────────────────
@@ -106,7 +109,7 @@ def _worker(job_id: str, api_key: str, icp_desc: str, df: pd.DataFrame) -> None:
     job = _get_jobs()[job_id]
     stop_event: threading.Event = job["stop_event"]
     out_rows: list[dict] = []
-    total_tokens = 0
+    total_in = total_out = 0
     errors = 0
 
     for idx, row in df.iterrows():
@@ -121,25 +124,31 @@ def _worker(job_id: str, api_key: str, icp_desc: str, df: pd.DataFrame) -> None:
         except Exception:
             cname = f"row_{idx}"
 
-        job["log"].append(f"Analyzing [{cname}]...")
         job["processed"] = len(out_rows)
 
         try:
-            result, tok = score_company_row(api_key, icp_desc, row_dict)
-            total_tokens += tok
+            result, (in_tok, out_tok) = score_company_row(api_key, icp_desc, row_dict)
+            total_in += in_tok
+            total_out += out_tok
         except Exception as e:
             errors += 1
-            job["log"].append(f"  ERROR: {e} → MANUAL_REVIEW")
             result = {
                 "ICP_Status": "MANUAL_REVIEW",
                 "Reason": f"Unhandled: {e}",
                 "Data_Source": "Error",
             }
 
+        status = result.get("ICP_Status", "?")
+        source = result.get("Data_Source", "")
+        reason = (result.get("Reason") or "")[:70]
+        icon = {"YES": "✅", "NO": "❌", "MAYBE": "⚠️"}.get(status, "🔵")
+        job["log"].append(f"{icon} {cname}  [{source}]  {reason}")
+
         out_rows.append({**row_dict, **result})
         job["processed"] = len(out_rows)
         job["errors"] = errors
-        job["tokens"] = total_tokens
+        job["input_tokens"] = total_in
+        job["output_tokens"] = total_out
 
     result_df = pd.DataFrame(out_rows) if out_rows else pd.DataFrame()
     job["result_df"] = result_df
@@ -170,7 +179,8 @@ def start_job(api_key: str, icp_desc: str, df: pd.DataFrame) -> str:
         "processed": 0,
         "total": len(df),
         "errors": 0,
-        "tokens": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
         "log": [],
         "result_df": None,
         "result_xlsx": None,
@@ -236,15 +246,20 @@ def main_ui(authenticator: stauth.Authenticate) -> None:
         )
         st.session_state.icp_profile = icp
 
+        st.caption("Цена токенов (Claude Haiku 4.5)")
         st.number_input(
-            "Цена за 1M токенов ($)",
-            min_value=0.01,
-            max_value=1000.0,
-            step=0.05,
-            format="%.2f",
-            key="cost_per_million_field",
+            "Input: цена за 1M токенов ($)",
+            min_value=0.01, max_value=1000.0, step=0.1, format="%.2f",
+            key="cost_input_per_million",
             disabled=is_running,
-            help="Claude Haiku 4.5: $1/M input, $5/M output. Дефолт 2.0 — средняя.",
+            help="Входящие токены. Haiku 4.5 = $1.00/M",
+        )
+        st.number_input(
+            "Output: цена за 1M токенов ($)",
+            min_value=0.01, max_value=1000.0, step=0.1, format="%.2f",
+            key="cost_output_per_million",
+            disabled=is_running,
+            help="Исходящие токены. Haiku 4.5 = $5.00/M",
         )
 
         st.divider()
@@ -288,33 +303,36 @@ def main_ui(authenticator: stauth.Authenticate) -> None:
     job = get_job(st.session_state.job_id)
 
     progress_bar = st.progress(0.0)
-    c1, c2, c3, c4 = st.columns(4)
-    m_proc   = c1.empty()
-    m_err    = c2.empty()
-    m_tokens = c3.empty()
-    m_cost   = c4.empty()
-    log_box  = st.empty()
+    c1, c2, c3, c4, c5 = st.columns(5)
+    m_proc    = c1.empty()
+    m_err     = c2.empty()
+    m_in_tok  = c3.empty()
+    m_out_tok = c4.empty()
+    m_cost    = c5.empty()
+    log_placeholder = st.empty()
 
-    rate = float(
-        st.session_state.get("cost_per_million_field") or DEFAULT_COST_PER_MILLION_TOKENS_USD
-    )
+    cost_in  = float(st.session_state.get("cost_input_per_million")  or DEFAULT_COST_INPUT_PER_MILLION_USD)
+    cost_out = float(st.session_state.get("cost_output_per_million") or DEFAULT_COST_OUTPUT_PER_MILLION_USD)
 
     def render_dashboard(j: dict) -> None:
         total = j["total"] or 1
         progress_bar.progress(min(j["processed"] / total, 1.0))
         m_proc.metric("Обработано", f"{j['processed']} / {j['total']}")
         m_err.metric("Ошибок", j["errors"])
-        tokens = j["tokens"]
-        m_tokens.metric("Токенов", f"{tokens:,}".replace(",", "\u202f"))
-        m_cost.metric("Затраты ($)", f"${estimate_cost_usd(tokens, rate):.4f}")
-        log_box.markdown("**Лог**\n```text\n{}\n```".format(
-            "\n".join(j["log"][-200:])
-        ))
+        in_tok  = j["input_tokens"]
+        out_tok = j["output_tokens"]
+        m_in_tok.metric("Input токены",  f"{in_tok:,}".replace(",", "\u202f"))
+        m_out_tok.metric("Output токены", f"{out_tok:,}".replace(",", "\u202f"))
+        m_cost.metric("Затраты ($)", f"${estimate_cost_usd(in_tok, out_tok, cost_in, cost_out):.4f}")
+        with log_placeholder.container(height=320, border=True):
+            st.caption("Лог обработки")
+            st.code("\n".join(j["log"][-100:]), language=None)
 
     if job is None:
         m_proc.metric("Обработано", "—")
         m_err.metric("Ошибок", "—")
-        m_tokens.metric("Токенов", "—")
+        m_in_tok.metric("Input токены", "—")
+        m_out_tok.metric("Output токены", "—")
         m_cost.metric("Затраты ($)", "—")
     elif not job["done"]:
         render_dashboard(job)

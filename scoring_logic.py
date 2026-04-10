@@ -18,8 +18,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MODEL = "claude-haiku-4-5"
-# Claude Haiku 4.5: $1/M input + $5/M output → rough average assuming ~4:1 ratio
-DEFAULT_COST_PER_MILLION_TOKENS_USD = 2.0
+# Claude Haiku 4.5 pricing
+DEFAULT_COST_INPUT_PER_MILLION_USD = 1.0
+DEFAULT_COST_OUTPUT_PER_MILLION_USD = 5.0
 
 JSON_INSTRUCTION = """You must respond with a single JSON object only, no markdown fences, no other text.
 Keys:
@@ -54,10 +55,10 @@ def _extract_json(text: str) -> dict[str, Any]:
 def call_claude_json(
     api_key: str,
     user_content: str,
-) -> tuple[dict[str, Any], int]:
+) -> tuple[dict[str, Any], int, int]:
     """
-    Returns (parsed_json, total_tokens_used).
-    On failure raises or returns MAYBE — caller wraps in try/except.
+    Returns (parsed_json, input_tokens, output_tokens).
+    On failure raises — caller wraps in try/except.
     """
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
@@ -78,23 +79,21 @@ def call_claude_json(
         elif isinstance(block, dict) and block.get("type") == "text":
             text += block.get("text") or ""
     usage = getattr(message, "usage", None)
-    tokens = 0
-    if usage is not None:
-        tokens = int(getattr(usage, "input_tokens", 0) or 0) + int(
-            getattr(usage, "output_tokens", 0) or 0
-        )
-    return _extract_json(text), tokens
+    in_tok = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
+    out_tok = int(getattr(usage, "output_tokens", 0) or 0) if usage else 0
+    return _extract_json(text), in_tok, out_tok
 
 
 def _safe_call_claude(
     api_key: str, prompt: str
-) -> tuple[dict[str, Any] | None, int, str | None]:
+) -> tuple[dict[str, Any] | None, int, int, str | None]:
+    """Returns (data, input_tokens, output_tokens, error)."""
     try:
-        data, tokens = call_claude_json(api_key, prompt)
-        return data, tokens, None
+        data, in_tok, out_tok = call_claude_json(api_key, prompt)
+        return data, in_tok, out_tok, None
     except Exception as e:
         logger.exception("Claude API error")
-        return None, 0, str(e)
+        return None, 0, 0, str(e)
 
 
 def step1_apollo(
@@ -103,18 +102,15 @@ def step1_apollo(
     short_description: str,
     technologies: str,
     keywords: str,
-) -> tuple[str, str, str, int]:
-    """
-    Returns (status, reason, source, tokens).
-    status in YES, NO, MAYBE — MAYBE triggers step 2.
-    """
+) -> tuple[str, str, str, int, int]:
+    """Returns (status, reason, source, input_tokens, output_tokens)."""
     has_any = any(
         str(x).strip()
         for x in (short_description, technologies, keywords)
         if x is not None and str(x).strip() and str(x).lower() != "nan"
     )
     if not has_any:
-        return "MAYBE", "No Apollo description/technologies/keywords", "Apollo_Data", 0
+        return "MAYBE", "No Apollo description/technologies/keywords", "Apollo_Data", 0, 0
 
     prompt = f"""You are a senior B2B sales researcher qualifying companies for a sales pipeline.
 
@@ -128,11 +124,11 @@ Company data from Apollo export:
 
 Based only on the above, does this company match the ICP?"""
 
-    data, tokens, err = _safe_call_claude(api_key, prompt)
+    data, in_tok, out_tok, err = _safe_call_claude(api_key, prompt)
     if err or data is None:
-        return "MAYBE", f"Step1 API/parse error: {err or 'unknown'}", "Apollo_Data", tokens
+        return "MAYBE", f"Step1 API/parse error: {err or 'unknown'}", "Apollo_Data", in_tok, out_tok
 
-    return data["status"], data["reason"], "Apollo_Data", tokens
+    return data["status"], data["reason"], "Apollo_Data", in_tok, out_tok
 
 
 def fetch_website_text(url: str, max_chars: int = 3000) -> tuple[str | None, str | None]:
@@ -173,10 +169,11 @@ def step2_website(
     api_key: str,
     icp_description: str,
     website_url: str,
-) -> tuple[str, str, str, int]:
+) -> tuple[str, str, str, int, int]:
+    """Returns (status, reason, source, input_tokens, output_tokens)."""
     text, err = fetch_website_text(website_url)
     if err or not text:
-        return "MAYBE", f"Website unavailable or empty: {err or 'unknown'}", "Website_Scraped", 0
+        return "MAYBE", f"Website unavailable or empty: {err or 'unknown'}", "Website_Scraped", 0, 0
 
     prompt = f"""You are a senior B2B sales researcher qualifying companies for a sales pipeline.
 
@@ -190,11 +187,11 @@ Below is text extracted from the company website (may be truncated):
 
 Does this company match the ICP?"""
 
-    data, tokens, api_err = _safe_call_claude(api_key, prompt)
+    data, in_tok, out_tok, api_err = _safe_call_claude(api_key, prompt)
     if api_err or data is None:
-        return "MAYBE", f"Step2 Claude error: {api_err or 'unknown'}", "Website_Scraped", tokens
+        return "MAYBE", f"Step2 Claude error: {api_err or 'unknown'}", "Website_Scraped", in_tok, out_tok
 
-    return data["status"], data["reason"], "Website_Scraped", tokens
+    return data["status"], data["reason"], "Website_Scraped", in_tok, out_tok
 
 
 def step3_ddg(
@@ -202,7 +199,8 @@ def step3_ddg(
     icp_description: str,
     company_name: str,
     linkedin_url: str,
-) -> tuple[str, str, str, int]:
+) -> tuple[str, str, str, int, int]:
+    """Returns (status, reason, source, input_tokens, output_tokens)."""
     query = f'{company_name or ""} {linkedin_url or ""} overview'.strip()
     snippets: list[str] = []
     try:
@@ -219,15 +217,10 @@ def step3_ddg(
             snippets.append(f"{title}\n{body}")
     except Exception as e:
         logger.exception("duckduckgo_search error")
-        return (
-            "MANUAL_REVIEW",
-            f"DDG search failed: {e}",
-            "DDG_Search",
-            0,
-        )
+        return "MANUAL_REVIEW", f"DDG search failed: {e}", "DDG_Search", 0, 0
 
     if not snippets:
-        return "MANUAL_REVIEW", "No DDG results", "DDG_Search", 0
+        return "MANUAL_REVIEW", "No DDG results", "DDG_Search", 0, 0
 
     combined = "\n\n---\n\n".join(snippets)[:4000]
 
@@ -243,14 +236,14 @@ DuckDuckGo search snippets for "{query}":
 
 Final decision: does this company match the ICP? If still unclear, answer MAYBE."""
 
-    data, tokens, api_err = _safe_call_claude(api_key, prompt)
+    data, in_tok, out_tok, api_err = _safe_call_claude(api_key, prompt)
     if api_err or data is None:
-        return "MANUAL_REVIEW", f"Step3 Claude error: {api_err or 'unknown'}", "DDG_Search", tokens
+        return "MANUAL_REVIEW", f"Step3 Claude error: {api_err or 'unknown'}", "DDG_Search", in_tok, out_tok
 
     st = data["status"]
     if st == "MAYBE":
-        return "MANUAL_REVIEW", data["reason"], "DDG_Search", tokens
-    return st, data["reason"], "DDG_Search", tokens
+        return "MANUAL_REVIEW", data["reason"], "DDG_Search", in_tok, out_tok
+    return st, data["reason"], "DDG_Search", in_tok, out_tok
 
 
 def score_company_row(
@@ -260,7 +253,7 @@ def score_company_row(
 ) -> tuple[dict[str, Any], int]:
     """
     Full waterfall for one company row (dict-like).
-    Returns (result_dict with ICP_Status, Reason, Data_Source), total_tokens).
+    Returns (result_dict with ICP_Status, Reason, Data_Source), (input_tokens, output_tokens)).
     """
     def col(*names: str) -> str:
         for n in names:
@@ -283,56 +276,44 @@ def score_company_row(
     company_name = col("Company Name", "Company", "Name", "company_name")
     linkedin = col("Company Linkedin Url", "Company LinkedIn Url", "linkedin_url", "Linkedin Url")
 
-    total_tokens = 0
+    total_in = total_out = 0
 
-    status, reason, source, tok = step1_apollo(
+    status, reason, source, in_tok, out_tok = step1_apollo(
         api_key, icp_description, short_desc, tech, kws
     )
-    total_tokens += tok
+    total_in += in_tok
+    total_out += out_tok
 
     if status in ("YES", "NO"):
-        return (
-            {
-                "ICP_Status": status,
-                "Reason": reason,
-                "Data_Source": source,
-            },
-            total_tokens,
-        )
+        return {"ICP_Status": status, "Reason": reason, "Data_Source": source}, (total_in, total_out)
 
     # MAYBE → step 2
-    status, reason, source, tok = step2_website(api_key, icp_description, website)
-    total_tokens += tok
+    status, reason, source, in_tok, out_tok = step2_website(api_key, icp_description, website)
+    total_in += in_tok
+    total_out += out_tok
 
     if status in ("YES", "NO"):
-        return (
-            {
-                "ICP_Status": status,
-                "Reason": reason,
-                "Data_Source": source,
-            },
-            total_tokens,
-        )
+        return {"ICP_Status": status, "Reason": reason, "Data_Source": source}, (total_in, total_out)
 
     # Still MAYBE or website failed → step 3
-    status, reason, source, tok = step3_ddg(api_key, icp_description, company_name, linkedin)
-    total_tokens += tok
+    status, reason, source, in_tok, out_tok = step3_ddg(api_key, icp_description, company_name, linkedin)
+    total_in += in_tok
+    total_out += out_tok
 
-    return (
-        {
-            "ICP_Status": status,
-            "Reason": reason,
-            "Data_Source": source,
-        },
-        total_tokens,
-    )
+    return {"ICP_Status": status, "Reason": reason, "Data_Source": source}, (total_in, total_out)
 
 
 def estimate_cost_usd(
-    total_tokens: int,
-    cost_per_million: float = DEFAULT_COST_PER_MILLION_TOKENS_USD,
+    input_tokens: int,
+    output_tokens: int,
+    cost_input_per_million: float = DEFAULT_COST_INPUT_PER_MILLION_USD,
+    cost_output_per_million: float = DEFAULT_COST_OUTPUT_PER_MILLION_USD,
 ) -> float:
-    return round(total_tokens * cost_per_million / 1_000_000, 6)
+    return round(
+        input_tokens * cost_input_per_million / 1_000_000
+        + output_tokens * cost_output_per_million / 1_000_000,
+        6,
+    )
 
 
 def export_colored_xlsx(df: "pd.DataFrame") -> bytes:
